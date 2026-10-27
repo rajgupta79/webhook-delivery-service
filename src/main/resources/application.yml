@@ -1,0 +1,40 @@
+server:
+  error:
+    include-message: always
+
+
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/webhooks
+    username: app
+    password: app
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+  data:
+    redis:
+      host: localhost
+      port: 6379
+  task:
+    scheduling:
+      pool:
+        size: 2
+
+webhook:
+  workers: 4
+
+management:
+  server:
+    port: 8081
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  metrics:
+    tags:
+      application: webhook-service
+
+logging:
+  pattern:
+    level: "%5p [event=%X{eventId:-} endpoint=%X{endpointId:-}]"

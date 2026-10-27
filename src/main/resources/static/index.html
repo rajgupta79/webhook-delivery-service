@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>Webhook Delivery</title>
+    <style>
+        :root{--bg:#f5f6f8;--card:#fff;--text:#1d2530;--muted:#6b7686;--line:#e3e6eb;--accent:#3b5bdb;--ok:#13a05a;--warn:#d99100;--bad:#d4372c;--info:#1d72e8}
+        @media(prefers-color-scheme:dark){:root{--bg:#0e1217;--card:#161b22;--text:#e5e9ef;--muted:#94a0b2;--line:#2a313b;--accent:#7b93ff}}
+        *{box-sizing:border-box}
+        body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+        header{position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;align-items:center;gap:8px 20px;padding:10px 16px;background:var(--card);border-bottom:1px solid var(--line)}
+        h1{margin:0;font-size:17px}
+        h3,h4{margin:.4em 0}
+        nav{display:flex;gap:4px;flex:1;flex-wrap:wrap}
+        nav a{padding:6px 12px;border-radius:8px;color:var(--muted);text-decoration:none;font-weight:600}
+        nav a.on{background:var(--accent);color:#fff}
+        .status{display:flex;align-items:center;gap:8px;font-size:12px}
+        .dot{width:9px;height:9px;border-radius:50%;background:var(--muted)}
+        .dot.ok{background:var(--ok)}.dot.bad{background:var(--bad)}
+        main{max-width:1100px;margin:0 auto;padding:16px}
+        .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px}
+        .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:14px}
+        .cards .card{margin:0}
+        .k{color:var(--muted);font-size:12px}
+        .v{font-size:26px;font-weight:700;color:var(--c,var(--text))}
+        .b-DELIVERED,.c-DELIVERED,.c-CLOSED{--c:var(--ok)}
+        .b-PENDING,.c-PENDING,.c-HALF_OPEN{--c:var(--warn)}
+        .b-DELIVERING,.c-DELIVERING{--c:var(--info)}
+        .b-DEAD,.c-DEAD,.c-OPEN{--c:var(--bad)}
+        .badge{display:inline-block;padding:1px 9px;border-radius:999px;font-size:12px;font-weight:700;color:var(--c,var(--muted));background:color-mix(in srgb,var(--c,var(--muted)) 16%,transparent)}
+        .bar{display:flex;height:12px;border-radius:6px;overflow:hidden;background:var(--line)}
+        .seg{background:var(--c)}
+        table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line)}
+        th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+        th{font-size:12px;color:var(--muted);font-weight:600}
+        tr.click{cursor:pointer}
+        tr.click:hover{background:color-mix(in srgb,var(--accent) 8%,transparent)}
+        .url{word-break:break-all;max-width:340px}
+        .scroll{overflow-x:auto;border-radius:12px}
+        .muted{color:var(--muted)}
+        .row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+        input,select,textarea,button{font:inherit;color:var(--text);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:7px 10px}
+        input[type=url],#send-key{flex:1;min-width:200px}
+        textarea{width:100%;font-family:ui-monospace,Consolas,monospace;margin:4px 0 8px}
+        button{cursor:pointer;font-weight:600}
+        button.p{background:var(--accent);color:#fff;border-color:var(--accent)}
+        .acts button{margin:0 4px 4px 0;padding:3px 9px;font-size:12px}
+        pre{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;overflow:auto;max-height:220px;white-space:pre-wrap;word-break:break-all}
+        dialog{width:min(680px,94vw);border:1px solid var(--line);border-radius:14px;background:var(--card);color:var(--text);padding:18px}
+        dialog::backdrop{background:#0008}
+        .err{color:var(--bad);font-weight:600}
+        a.ext{margin-right:14px;color:var(--accent)}
+        #toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%) translateY(80px);background:#222;color:#fff;padding:9px 16px;border-radius:10px;opacity:0;transition:.25s;z-index:20}
+        #toast.show{transform:translateX(-50%);opacity:1}
+    </style>
+</head>
+<body>
+<header>
+    <h1>Webhook Delivery</h1>
+    <nav>
+        <a data-tab="overview" href="#overview">Overview</a>
+        <a data-tab="endpoints" href="#endpoints">Endpoints</a>
+        <a data-tab="events" href="#events">Events</a>
+        <a data-tab="dead" href="#dead">Dead letters</a>
+    </nav>
+    <div class="status">
+        <span id="dot" class="dot"></span><span id="updated" class="muted">Loading...</span>
+        <label class="muted"><input type="checkbox" id="auto" checked> auto-refresh</label>
+    </div>
+</header>
+
+<main>
+    <section id="overview">
+        <div id="cards" class="cards"></div>
+        <div class="bar" id="bar"></div>
+        <p class="muted">Bar: green delivered, amber pending, blue delivering, red dead.</p>
+        <div class="card">
+            <b>Open tools</b><br>
+            <a class="ext" href="http://localhost:3000" target="_blank" rel="noopener">Grafana</a>
+            <a class="ext" href="http://localhost:9090/targets" target="_blank" rel="noopener">Prometheus targets</a>
+            <a class="ext" href="http://localhost:8081/actuator/health" target="_blank" rel="noopener">App health</a>
+        </div>
+    </section>
+
+    <section id="endpoints" hidden>
+        <form id="ep-form" class="row">
+            <input id="ep-url" type="url" placeholder="https://customer.example.com/webhooks" required>
+            <button class="p">Create endpoint</button>
+        </form>
+        <div class="scroll"><table>
+            <thead><tr><th>ID</th><th>URL</th><th>Rate/s</th><th>Circuit</th><th>Actions</th></tr></thead>
+            <tbody id="ep-body"></tbody>
+        </table></div>
+    </section>
+
+    <section id="events" hidden>
+        <form id="send" class="card">
+            <h3>Send a test event</h3>
+            <div class="row">
+                <select id="send-ep"></select>
+                <input id="send-key" placeholder="Idempotency key (optional)">
+            </div>
+            <textarea id="send-body" rows="3">{"event":"order.created","orderId":1001}</textarea>
+            <button class="p">Send</button>
+            <p class="muted">Leave the key empty for a fresh one. Send the same key twice to see deduplication.</p>
+        </form>
+        <div class="row">
+            <select id="f-status">
+                <option value="">All statuses</option>
+                <option>PENDING</option><option>DELIVERING</option><option>DELIVERED</option><option>DEAD</option>
+            </select>
+        </div>
+        <div class="scroll"><table>
+            <thead><tr><th>ID</th><th>Endpoint</th><th>Status</th><th>Tries</th><th>Created</th><th>Note</th></tr></thead>
+            <tbody id="ev-body"></tbody>
+        </table></div>
+    </section>
+
+    <section id="dead" hidden>
+        <div class="scroll"><table>
+            <thead><tr><th>ID</th><th>Endpoint</th><th>Why it died</th><th>When</th><th></th></tr></thead>
+            <tbody id="dead-body"></tbody>
+        </table></div>
+    </section>
+</main>
+
+<dialog id="dlg"><div id="dlg-body"></div><form method="dialog"><button>Close</button></form></dialog>
+<div id="toast"></div>
+
+<script>
+    const $ = (s) => document.querySelector(s);
+    const TABS = ['overview', 'endpoints', 'events', 'dead'];
+    let tab = 'overview';
+
+    // Escape anything that came from users (URLs, payloads) before putting it into HTML.
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
+        (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+    function ago(v) {
+        if (v == null || v === '') return '';
+        const t = typeof v === 'number' ? v * 1000 : Date.parse(v);
+        const s = Math.max(0, (Date.now() - t) / 1000);
+        if (s < 60) return Math.floor(s) + 's ago';
+        if (s < 3600) return Math.floor(s / 60) + 'm ago';
+        if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+        return Math.floor(s / 86400) + 'd ago';
+    }
+
+    let toastTimer;
+    function toast(msg) {
+        const t = $('#toast');
+        t.textContent = msg;
+        t.classList.add('show');
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => t.classList.remove('show'), 3500);
+    }
+
+    async function api(path, opts = {}) {
+        const res = await fetch(path, {
+            ...opts,
+            headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
+        });
+        const text = await res.text();
+        let data = null;
+        try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+        if (!res.ok) {
+            throw new Error(data && data.message ? data.message
+                : res.status + ' ' + (data && data.error ? data.error : res.statusText));
+        }
+        return data;
+    }
+
+    function openDialog(html) {
+        $('#dlg-body').innerHTML = html;
+        if (!$('#dlg').open) $('#dlg').showModal();
+    }
+
+    /* ---------- tabs ---------- */
+    function route() {
+        const h = location.hash.slice(1);
+        tab = TABS.includes(h) ? h : 'overview';
+        document.querySelectorAll('nav a').forEach((a) => a.classList.toggle('on', a.dataset.tab === tab));
+        document.querySelectorAll('main > section').forEach((s) => { s.hidden = s.id !== tab; });
+        refresh();
+    }
+
+    async function refresh() {
+        try {
+            if (tab === 'overview') await loadOverview();
+            if (tab === 'endpoints') await loadEndpoints();
+            if (tab === 'events') await loadEvents();
+            if (tab === 'dead') await loadDead();
+            $('#dot').className = 'dot ok';
+            $('#updated').textContent = 'Updated ' + new Date().toLocaleTimeString();
+        } catch (e) {
+            $('#dot').className = 'dot bad';
+            $('#updated').textContent = 'Problem: ' + e.message;
+        }
+    }
+
+    /* ---------- overview ---------- */
+    async function loadOverview() {
+        const s = await api('/api/dashboard/summary');
+        const st = s.byStatus;
+        const done = (st.DELIVERED || 0) + (st.DEAD || 0);
+        const rate = done ? ((st.DELIVERED || 0) / done * 100).toFixed(1) + '%' : '-';
+        const n = (v) => (v < 0 ? 'n/a' : v);
+        $('#cards').innerHTML = [
+            ['Delivered', st.DELIVERED || 0, 'c-DELIVERED'],
+            ['Pending', st.PENDING || 0, 'c-PENDING'],
+            ['Delivering', st.DELIVERING || 0, 'c-DELIVERING'],
+            ['Dead', st.DEAD || 0, 'c-DEAD'],
+            ['Success rate', rate, ''],
+            ['Queue depth', n(s.queueDepth), ''],
+            ['Parked (retry/limit)', n(s.delayed), ''],
+            ['Endpoints', s.endpoints, ''],
+        ].map(([k, v, c]) => `<div class="card"><div class="k">${k}</div><div class="v ${c}">${v}</div></div>`).join('');
+
+        const total = Object.values(st).reduce((a, b) => a + b, 0) || 1;
+        $('#bar').innerHTML = ['DELIVERED', 'PENDING', 'DELIVERING', 'DEAD']
+            .map((k) => `<span class="seg c-${k}" style="width:${(st[k] || 0) / total * 100}%" title="${k}: ${st[k] || 0}"></span>`).join('');
+    }
+
+    /* ---------- endpoints ---------- */
+    function fillEndpointSelect(list) {
+        const sel = $('#send-ep');
+        const cur = sel.value;
+        sel.innerHTML = list.map((e) => `<option value="${e.id}">#${e.id}  ${esc(e.url)}</option>`).join('');
+        if (cur) sel.value = cur;
+    }
+
+    async function loadEndpoints() {
+        const list = await api('/api/dashboard/endpoints');
+        fillEndpointSelect(list);
+        $('#ep-body').innerHTML = list.map((e) => `<tr>
+    <td>${e.id}</td>
+    <td class="url">${esc(e.url)}</td>
+    <td>${e.rateLimitPerSecond ?? '5 (default)'}</td>
+    <td><span class="badge c-${esc(e.circuit.state)}">${esc(e.circuit.state)}</span>
+        <small class="muted">${e.circuit.consecutiveFailures ? e.circuit.consecutiveFailures + ' fails' : ''}</small></td>
+    <td class="acts">
+      <button data-a="limit" data-id="${e.id}">Rate limit</button>
+      <button data-a="rotate" data-id="${e.id}">Rotate secret</button>
+      <button data-a="replay" data-id="${e.id}">Replay dead</button>
+    </td></tr>`).join('')
+            || '<tr><td colspan="5" class="muted">No endpoints yet. Create one above.</td></tr>';
+    }
+
+    function showSecret(title, id, secret) {
+        openDialog(`<h3>${esc(title)}</h3>
+    <p>Endpoint ${id}. Copy this signing secret now. It is not shown again.</p>
+    <pre>${esc(secret)}</pre><button id="copy" class="p">Copy</button>`);
+        $('#copy').onclick = () => navigator.clipboard.writeText(secret).then(() => toast('Copied'));
+    }
+
+    $('#ep-form').addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        try {
+            const e = await api('/endpoints', { method: 'POST', body: JSON.stringify({ url: $('#ep-url').value.trim() }) });
+            $('#ep-url').value = '';
+            showSecret('Endpoint created', e.id, e.secret);
+            refresh();
+        } catch (err) { toast('Could not create: ' + err.message); }
+    });
+
+    $('#ep-body').addEventListener('click', async (ev) => {
+        const b = ev.target.closest('button');
+        if (!b) return;
+        const id = b.dataset.id;
+        try {
+            if (b.dataset.a === 'limit') {
+                const v = parseInt(prompt('Max deliveries per second for endpoint ' + id + ' (1 to 1000):', '5'), 10);
+                if (!v) return;
+                await api(`/endpoints/${id}/rate-limit?perSecond=${v}`, { method: 'PUT' });
+                toast('Rate limit set to ' + v + '/s');
+            } else if (b.dataset.a === 'rotate') {
+                const g = parseInt(prompt('Keep the old secret working for how many seconds? (0 = revoke now)', '86400'), 10);
+                if (Number.isNaN(g)) return;
+                const r = await api(`/endpoints/${id}/rotate-secret?graceSeconds=${g}`, { method: 'POST' });
+                showSecret('New secret', id, r.secret);
+            } else if (b.dataset.a === 'replay') {
+                if (!confirm('Replay up to 500 dead events for endpoint ' + id + '?')) return;
+                const r = await api(`/endpoints/${id}/replay-dead`, { method: 'POST' });
+                toast('Replayed ' + r.replayed + ' events');
+            }
+            refresh();
+        } catch (err) { toast('Failed: ' + err.message); }
+    });
+
+    /* ---------- events ---------- */
+    async function loadEvents() {
+        if (!$('#send-ep').options.length) fillEndpointSelect(await api('/api/dashboard/endpoints'));
+        const status = $('#f-status').value;
+        const list = await api('/api/dashboard/events?limit=50' + (status ? '&status=' + status : ''));
+        $('#ev-body').innerHTML = list.map((e) => `<tr class="click" data-id="${e.id}">
+    <td>${e.id}</td><td>${e.endpointId}</td>
+    <td><span class="badge b-${esc(e.status)}">${esc(e.status)}</span></td>
+    <td>${e.attempts ?? 0}</td><td>${ago(e.createdAt)}</td>
+    <td class="muted">${esc(e.deadReason || '')}</td></tr>`).join('')
+            || '<tr><td colspan="6" class="muted">No events.</td></tr>';
+    }
+
+    $('#f-status').addEventListener('change', refresh);
+    $('#ev-body').addEventListener('click', (ev) => {
+        const tr = ev.target.closest('tr[data-id]');
+        if (tr) openEvent(tr.dataset.id);
+    });
+
+    $('#send').addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        const id = $('#send-ep').value;
+        if (!id) return toast('Create an endpoint first');
+        const body = $('#send-body').value.trim();
+        try { JSON.parse(body); } catch { return toast('The body must be valid JSON'); }
+        const key = $('#send-key').value.trim() || crypto.randomUUID();
+        try {
+            const eventId = await api(`/endpoints/${id}/events`, {
+                method: 'POST', headers: { 'Idempotency-Key': key }, body,
+            });
+            toast('Accepted (202). Event id ' + eventId);
+            refresh();
+        } catch (err) { toast('Send failed: ' + err.message); }
+    });
+
+    async function openEvent(id) {
+        try {
+            const [e, tries] = await Promise.all([api('/events/' + id), api(`/events/${id}/attempts`)]);
+            openDialog(`
+      <h3>Event ${e.id} <span class="badge b-${esc(e.status)}">${esc(e.status)}</span></h3>
+      <p class="muted">Endpoint ${e.endpointId} | key <code>${esc(e.idempotencyKey)}</code> |
+         ${e.attempts ?? 0} attempts | replayed ${e.replayCount ?? 0} times</p>
+      ${e.deadReason ? `<p class="err">${esc(e.deadReason)}</p>` : ''}
+      <h4>Payload</h4><pre>${esc(e.payload)}</pre>
+      <h4>Delivery attempts</h4>
+      <div class="scroll"><table>
+        <thead><tr><th>#</th><th>Result</th><th>Took</th><th>When</th></tr></thead>
+        <tbody>${tries.map((t) => `<tr><td>${t.attemptNumber}</td>
+          <td>${t.statusCode != null ? 'HTTP ' + t.statusCode : esc(t.error || 'no response')}</td>
+          <td>${t.durationMs} ms</td><td>${ago(t.createdAt)}</td></tr>`).join('')
+            || '<tr><td colspan="4" class="muted">No attempts yet.</td></tr>'}</tbody>
+      </table></div><br>
+      ${e.status === 'DEAD' ? `<button class="p" data-replay="${e.id}">Replay this event</button>` : ''}`);
+        } catch (err) { toast('Could not load event: ' + err.message); }
+    }
+
+    async function replay(id) {
+        try {
+            await api(`/events/${id}/replay`, { method: 'POST' });
+            toast('Event ' + id + ' queued for replay');
+            if ($('#dlg').open) $('#dlg').close();
+            refresh();
+        } catch (err) { toast('Replay failed: ' + err.message); }
+    }
+
+    $('#dlg-body').addEventListener('click', (ev) => {
+        const b = ev.target.closest('button[data-replay]');
+        if (b) replay(b.dataset.replay);
+    });
+
+    /* ---------- dead letters ---------- */
+    async function loadDead() {
+        const list = await api('/dead-letters?size=50');
+        $('#dead-body').innerHTML = list.map((e) => `<tr>
+    <td>${e.id}</td><td>${e.endpointId}</td><td>${esc(e.deadReason)}</td><td>${ago(e.deadAt)}</td>
+    <td class="acts"><button data-replay="${e.id}">Replay</button>
+        <button data-view="${e.id}">View</button></td></tr>`).join('')
+            || '<tr><td colspan="5" class="muted">Nothing is dead. Good.</td></tr>';
+    }
+
+    $('#dead-body').addEventListener('click', (ev) => {
+        const b = ev.target.closest('button');
+        if (!b) return;
+        if (b.dataset.replay) replay(b.dataset.replay);
+        if (b.dataset.view) openEvent(b.dataset.view);
+    });
+
+    /* ---------- start ---------- */
+    window.addEventListener('hashchange', route);
+    setInterval(() => {
+        if ($('#auto').checked && !document.hidden && !$('#dlg').open) refresh();
+    }, 5000);
+    route();
+</script>
+</body>
+</html>
